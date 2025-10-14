@@ -6,6 +6,8 @@ import axios from "axios";
 import Auth from "./Auth";
 
 function Transcription() {
+  const API_URL = import.meta.env.VITE_API_URL;
+
   const [audioFile, setAudioFile] = useState(null);
   const [transcript, setTranscript] = useState("");
   const [loading, setLoading] = useState(false);
