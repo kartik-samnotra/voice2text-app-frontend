@@ -18,7 +18,7 @@ function Transcription() {
 
   const fetchTranscriptions = async () => {
     try {
-      const res = await axios.get("http://localhost:5000/api/transcriptions");
+      const res = await axios.get(`${API_URL}/api/transcriptions`);
       setHistory(res.data);
     } catch (err) {
       console.error("Error fetching transcriptions:", err);
@@ -69,7 +69,7 @@ function Transcription() {
     try {
       setLoading(true);
       setTranscript("");
-      const res = await axios.post("http://localhost:5000/api/transcribe", formData, {
+      const res = await axios.get(`${API_URL}/api/transcriptions`), formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       setTranscript(res.data.transcript);
