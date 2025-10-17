@@ -47,11 +47,11 @@ function Transcription() {
     }
 
     try {
-      const res = await axios.get("http://localhost:5000/api/transcriptions", {
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-      });
+      const res = await axios.get("https://your-backend-url.onrender.com/api/transcriptions", {
+  headers: {
+    Authorization: `Bearer ${session.access_token}`,
+  },
+});
       setHistory(res.data);
     } catch (err) {
       console.error("Error fetching transcriptions:", err);
