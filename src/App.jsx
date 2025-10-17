@@ -47,7 +47,7 @@ function Transcription() {
     }
 
     try {
-      const res = await axios.get("https://your-backend-url.onrender.com/api/transcriptions", {
+      const res = await axios.get("https://voice2text-backend-6oaj.onrender.com/api/transcriptions", {
   headers: {
     Authorization: `Bearer ${session.access_token}`,
   },
