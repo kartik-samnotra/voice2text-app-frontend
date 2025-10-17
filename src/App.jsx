@@ -47,7 +47,7 @@ function Transcription() {
     }
 
     try {
-      const res = await axios.get("https://voice2text-backend-6oaj.onrender.com", {
+      const res = await axios.get("https://voice2text-backend-6oaj.onrender.com/api/transcriptions", {
   headers: {
     Authorization: `Bearer ${session.access_token}`,
   },
@@ -134,7 +134,7 @@ function Transcription() {
     try {
       setLoading(true);
       setTranscript("");
-      const res = await axios.post("http://localhost:5000/api/transcribe", formData, {
+      const res = await axios.post("https://voice2text-backend-6oaj.onrender.com/api/transcribe", formData, {
         headers: {
           "Content-Type": "multipart/form-data",
           Authorization: `Bearer ${session.access_token}`,
