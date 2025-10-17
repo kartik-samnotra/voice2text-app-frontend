@@ -156,96 +156,72 @@ function Transcription() {
 
   // Upload audio + send Supabase token to backend
   const handleUpload = async (file = audioFile) => {
-    console.log("🚀 Starting upload process...");
+  console.log("🚀 Starting upload process...");
+  
+  if (!file) {
+    alert("Please select or record an audio file first!");
+    return;
+  }
+
+  console.log("📁 File to upload:", file.name, file.size, "bytes");
+
+  // Get fresh session every time
+  const { data: { session: currentSession } } = await supabase.auth.getSession();
+  console.log("🔑 Current session:", currentSession);
+
+  if (!currentSession) {
+    alert("You must be logged in to transcribe. Redirecting to login...");
+    window.location.href = "/auth";
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("audio", file);
+
+  try {
+    setLoading(true);
+    setTranscript("");
     
-    if (!file) {
-      alert("Please select or record an audio file first!");
-      return;
+    console.log("📤 Sending request to backend...");
+    
+    const response = await fetch(`${BACKEND_URL}/api/transcribe`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${currentSession.access_token}`,
+        // Don't set Content-Type for FormData - let browser set it with boundary
+      },
+      body: formData,
+    });
+
+    console.log("📨 Response status:", response.status);
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+      throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
     }
 
-    console.log("📁 File to upload:", file.name, file.size, "bytes");
-
-    // Get fresh session every time
-    const { data: { session: currentSession } } = await supabase.auth.getSession();
-    console.log("🔑 Current session:", currentSession);
-
-    if (!currentSession) {
-      alert("You must be logged in to transcribe. Redirecting to login...");
-      window.location.href = "/auth";
-      return;
+    const data = await response.json();
+    console.log("✅ Transcription successful:", data);
+    setTranscript(data.transcript);
+    
+    // Refresh history after new transcription
+    await fetchTranscriptions();
+    
+  } catch (err) {
+    console.error("❌ Transcription failed:", err);
+    
+    // More specific error messages
+    if (err.name === 'TypeError' && err.message.includes('Failed to fetch')) {
+      alert("Network error: Cannot connect to the server. Please check your internet connection.");
+    } else if (err.message.includes('CORS')) {
+      alert("CORS error: The server is not configured to accept requests from this domain.");
+    } else {
+      alert(`Transcription failed: ${err.message}`);
     }
-
-    // Verify token
-    if (!currentSession.access_token) {
-      alert("Authentication token is missing. Please log in again.");
-      await supabase.auth.signOut();
-      window.location.href = "/auth";
-      return;
-    }
-
-    console.log("🔐 Token length:", currentSession.access_token.length);
-    console.log("🌐 Backend URL:", BACKEND_URL);
-
-    const formData = new FormData();
-    formData.append("audio", file);
-
-    try {
-      setLoading(true);
-      setTranscript("");
-      
-      console.log("📤 Sending request to backend...");
-      
-      const response = await axios.post(`${BACKEND_URL}/api/transcribe`, formData, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-          Authorization: `Bearer ${currentSession.access_token}`,
-        },
-        timeout: 60000, // 60 seconds for large files
-        onUploadProgress: (progressEvent) => {
-          if (progressEvent.total) {
-            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-            console.log(`📊 Upload progress: ${percentCompleted}%`);
-          }
-        },
-      });
-
-      console.log("✅ Transcription successful:", response.data);
-      setTranscript(response.data.transcript);
-      
-      // Refresh history after new transcription
-      await fetchTranscriptions();
-      
-    } catch (err) {
-      console.error("❌ Transcription failed:", err);
-      
-      if (err.response) {
-        // Server responded with error status
-        console.error("Response status:", err.response.status);
-        console.error("Response data:", err.response.data);
-        console.error("Response headers:", err.response.headers);
-        
-        if (err.response.status === 401) {
-          alert("Authentication failed. Please log in again.");
-          await supabase.auth.signOut();
-          window.location.href = "/auth";
-        } else if (err.response.status === 413) {
-          alert("File too large. Please try a smaller audio file.");
-        } else {
-          alert(`Transcription failed: ${err.response.data.message || "Server error"}`);
-        }
-      } else if (err.request) {
-        // No response received
-        console.error("No response received:", err.request);
-        alert("No response from server. Please check your internet connection and try again.");
-      } else {
-        // Request setup error
-        console.error("Request setup error:", err.message);
-        alert("Request failed: " + err.message);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
+  } finally {
+    setLoading(false);
+  }
+};
 
   const downloadTranscript = () => {
     const element = document.createElement("a");
