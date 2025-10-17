@@ -9,6 +9,9 @@ import { supabase } from "./supabaseClient";
 import ProtectedRoute from "./ProtectedRoute";
 import { Mic, Upload, History, LogOut, Menu, X, Download, Play, Square, Sun, Moon } from "lucide-react";
 
+// Backend URL - Update this if your Render URL changes
+const BACKEND_URL = "https://voice2text-backend-6oaj.onrender.com";
+
 /* -----------------------
    Transcription component
    ----------------------- */
@@ -21,6 +24,7 @@ function Transcription() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [uploadMethod, setUploadMethod] = useState("file");
   const [darkMode, setDarkMode] = useState(false);
+  const [session, setSession] = useState(null);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
 
@@ -38,43 +42,74 @@ function Transcription() {
     }
   }, [darkMode]);
 
+  // Get session and set up auth listener
+  useEffect(() => {
+    const getSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      console.log("🔑 Initial session:", session);
+      setSession(session);
+    };
+    
+    getSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log("🔄 Auth state changed:", event, session);
+        setSession(session);
+        if (session) {
+          await fetchTranscriptions();
+        } else {
+          setHistory([]);
+        }
+      }
+    );
+
+    return () => subscription.unsubscribe();
+  }, []);
+
   // Fetch transcriptions for the logged-in user
   const fetchTranscriptions = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
+    console.log("📋 Fetching transcriptions...");
+    
     if (!session) {
+      console.log("❌ No session, skipping fetch");
       setHistory([]);
       return;
     }
 
     try {
-      const res = await axios.get("https://voice2text-backend-6oaj.onrender.com/api/transcriptions", {
-  headers: {
-    Authorization: `Bearer ${session.access_token}`,
-  },
-});
+      console.log("🔐 Token being sent:", session.access_token ? "Present" : "Missing");
+      
+      const res = await axios.get(`${BACKEND_URL}/api/transcriptions`, {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        timeout: 10000,
+      });
+      
+      console.log("✅ Transcriptions fetched:", res.data.length);
       setHistory(res.data);
     } catch (err) {
-      console.error("Error fetching transcriptions:", err);
+      console.error("❌ Error fetching transcriptions:", err);
+      if (err.response) {
+        console.error("Response status:", err.response.status);
+        console.error("Response data:", err.response.data);
+        
+        if (err.response.status === 401) {
+          console.log("🔄 Token might be expired, refreshing session...");
+          const { data: { session: newSession } } = await supabase.auth.getSession();
+          setSession(newSession);
+        }
+      } else if (err.request) {
+        console.error("No response received:", err.request);
+      }
     }
   };
-
-  useEffect(() => {
-    fetchTranscriptions();
-    // subscribe to auth changes to refetch if user changes
-    const { data: listener } = supabase.auth.onAuthStateChange(() => {
-      fetchTranscriptions();
-    });
-    return () => {
-      try {
-        listener.subscription.unsubscribe();
-      } catch (e) {}
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
+      console.log("📁 File selected:", file.name, file.size, "bytes");
       setAudioFile(file);
       setUploadMethod("file");
     }
@@ -94,6 +129,7 @@ function Transcription() {
       mediaRecorder.onstop = async () => {
         const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
         const file = new File([blob], "recorded.webm", { type: "audio/webm" });
+        console.log("🎙️ Recording finished:", blob.size, "bytes");
         setAudioFile(file);
         setUploadMethod("record");
         // Auto-transcribe after recording
@@ -102,7 +138,9 @@ function Transcription() {
 
       mediaRecorder.start();
       setRecording(true);
-    } catch {
+      console.log("🎙️ Recording started");
+    } catch (error) {
+      console.error("❌ Recording error:", error);
       alert("Please allow microphone access to record audio.");
     }
   };
@@ -112,21 +150,41 @@ function Transcription() {
       mediaRecorderRef.current.stop();
       mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
       setRecording(false);
+      console.log("⏹️ Recording stopped");
     }
   };
 
   // Upload audio + send Supabase token to backend
   const handleUpload = async (file = audioFile) => {
+    console.log("🚀 Starting upload process...");
+    
     if (!file) {
       alert("Please select or record an audio file first!");
       return;
     }
 
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      alert("You must be logged in to transcribe.");
+    console.log("📁 File to upload:", file.name, file.size, "bytes");
+
+    // Get fresh session every time
+    const { data: { session: currentSession } } = await supabase.auth.getSession();
+    console.log("🔑 Current session:", currentSession);
+
+    if (!currentSession) {
+      alert("You must be logged in to transcribe. Redirecting to login...");
+      window.location.href = "/auth";
       return;
     }
+
+    // Verify token
+    if (!currentSession.access_token) {
+      alert("Authentication token is missing. Please log in again.");
+      await supabase.auth.signOut();
+      window.location.href = "/auth";
+      return;
+    }
+
+    console.log("🔐 Token length:", currentSession.access_token.length);
+    console.log("🌐 Backend URL:", BACKEND_URL);
 
     const formData = new FormData();
     formData.append("audio", file);
@@ -134,18 +192,56 @@ function Transcription() {
     try {
       setLoading(true);
       setTranscript("");
-      const res = await axios.post("https://voice2text-backend-6oaj.onrender.com/api/transcribe", formData, {
+      
+      console.log("📤 Sending request to backend...");
+      
+      const response = await axios.post(`${BACKEND_URL}/api/transcribe`, formData, {
         headers: {
           "Content-Type": "multipart/form-data",
-          Authorization: `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${currentSession.access_token}`,
+        },
+        timeout: 60000, // 60 seconds for large files
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            console.log(`📊 Upload progress: ${percentCompleted}%`);
+          }
         },
       });
-      setTranscript(res.data.transcript || res.data.transcript);
+
+      console.log("✅ Transcription successful:", response.data);
+      setTranscript(response.data.transcript);
+      
       // Refresh history after new transcription
       await fetchTranscriptions();
+      
     } catch (err) {
-      alert("Transcription failed! Please check if the server is running.");
-      console.error(err);
+      console.error("❌ Transcription failed:", err);
+      
+      if (err.response) {
+        // Server responded with error status
+        console.error("Response status:", err.response.status);
+        console.error("Response data:", err.response.data);
+        console.error("Response headers:", err.response.headers);
+        
+        if (err.response.status === 401) {
+          alert("Authentication failed. Please log in again.");
+          await supabase.auth.signOut();
+          window.location.href = "/auth";
+        } else if (err.response.status === 413) {
+          alert("File too large. Please try a smaller audio file.");
+        } else {
+          alert(`Transcription failed: ${err.response.data.message || "Server error"}`);
+        }
+      } else if (err.request) {
+        // No response received
+        console.error("No response received:", err.request);
+        alert("No response from server. Please check your internet connection and try again.");
+      } else {
+        // Request setup error
+        console.error("Request setup error:", err.message);
+        alert("Request failed: " + err.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -159,6 +255,34 @@ function Transcription() {
     document.body.appendChild(element);
     element.click();
     document.body.removeChild(element);
+  };
+
+  // Test function to debug authentication
+  const testAuth = async () => {
+    console.log("🧪 Testing authentication...");
+    
+    const { data: { session: testSession } } = await supabase.auth.getSession();
+    console.log("🔑 Test session:", testSession);
+    
+    if (!testSession) {
+      console.log("❌ No session found");
+      return;
+    }
+
+    console.log("🔐 Token (first 50 chars):", testSession.access_token?.substring(0, 50) + "...");
+    
+    try {
+      const testRes = await axios.get(`${BACKEND_URL}/api/transcriptions`, {
+        headers: {
+          Authorization: `Bearer ${testSession.access_token}`,
+        },
+      });
+      console.log("✅ Auth test successful:", testRes.data);
+      alert("Authentication test: SUCCESS! Backend connection is working.");
+    } catch (err) {
+      console.error("❌ Auth test failed:", err.response?.data || err.message);
+      alert("Authentication test: FAILED! Check console for details.");
+    }
   };
 
   return (
@@ -191,6 +315,16 @@ function Transcription() {
             }`}
           >
             <X size={20} className={darkMode ? "text-gray-300" : "text-gray-600"} />
+          </button>
+        </div>
+
+        {/* Debug button - remove in production */}
+        <div className="mb-4">
+          <button
+            onClick={testAuth}
+            className="w-full bg-yellow-500 hover:bg-yellow-600 text-white py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            🧪 Test Auth & Connection
           </button>
         </div>
 
@@ -262,6 +396,15 @@ function Transcription() {
           </div>
 
           <div className="flex items-center gap-4">
+            {/* Session Info - for debugging */}
+            {session && (
+              <div className={`text-xs px-2 py-1 rounded ${
+                darkMode ? 'bg-green-800 text-green-200' : 'bg-green-100 text-green-800'
+              }`}>
+                ✅ Logged in
+              </div>
+            )}
+
             {/* Dark Mode Toggle */}
             <button
               onClick={toggleDarkMode}
@@ -578,15 +721,23 @@ export default function App() {
 
   useEffect(() => {
     // load initial session
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    supabase.auth.getSession().then(({ data }) => {
+      console.log("🏠 App session:", data.session);
+      setSession(data.session);
+    });
+    
     // listen for changes
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      console.log("🏠 App auth state changed:", _event, session);
       setSession(session);
     });
+    
     return () => {
       try {
-        listener.subscription.unsubscribe();
-      } catch (e) {}
+        subscription.unsubscribe();
+      } catch (e) {
+        console.error("Error unsubscribing:", e);
+      }
     };
   }, []);
 
