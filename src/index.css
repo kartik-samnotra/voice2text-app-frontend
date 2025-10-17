@@ -1,7 +1,0 @@
-/* * This file MUST only contain the Tailwind directives.
-* All styling (colors, fonts, backgrounds, spacing) is now controlled
-* by the utility classes in the App.jsx file.
-*/
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
